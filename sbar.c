@@ -14,9 +14,9 @@
 #include <X11/Xlib.h>
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
+#include <sys/sysinfo.h>
 
 char *config[] = { 
-"/proc/cpuinfo",
 "/proc/acpi/battery/BAT0/state",
 "/proc/acpi/ibm/volume",
 };
@@ -27,19 +27,6 @@ static char card[64] = "default";
 static int smixer_level = 0;
 static struct snd_mixer_selem_regopt smixer_options;
 
-
-struct cpu_info {
-    char *conf;
-    int interval;
-} cpu_info;
-
-struct cpu_info *cpu_info_init(char *cpuconf) {
-    struct cpu_info *cpu = malloc(sizeof(struct cpu_info));
-    assert(cpu != NULL);
-    cpu->conf = strdup(cpuconf);
-    cpu->interval = 5;
-    return cpu;
-}
 
 struct bat_info {
     char *conf;
@@ -69,26 +56,18 @@ typedef struct bat_ustate {
 } bat_state;
 
 
-typedef struct sbar_info {
-    int cpustr;
-    int batmin;
-    char volstr[10];
-    char datestr[32];
-
-} sbar_info;
-
-void cleanup(struct cpu_info *cpu,struct bat_info *bat)  {
-    free(cpu->conf);
-    free(cpu);
+void cleanup(struct bat_info *bat)  {
     free(bat->conf);
     free(bat);
 }
+
 
 static int alsa_parse_simple_id(const char *str, snd_mixer_selem_id_t *sid)
 {
 	int c, size;
 	char buf[128];
 	char *ptr = buf;
+
 
 	while (*str == ' ' || *str == '\t')
 		str++;
@@ -156,33 +135,25 @@ static int alsa_convert_prange(int val, int min, int max)
 	return tmp;
 }
 
-int get_localtime(sbar_info *sbi) {
+int get_localtime(char *sbi) {
     time_t t;
+    struct tm *tmp;
+
     char outstr[100];
     char result[100];
     int ret;
     t = time(NULL);
-    ret = strftime(outstr,sizeof(outstr),"%c",localtime(&t));
-    strcpy(sbi->datestr,outstr);
+    tmp = localtime(&t);
+    if (tmp == NULL ) {
+        perror("localtime");
+    }
+    if ( strftime(outstr,sizeof(outstr),"%c",tmp) == 0 ) {
+        printf("ERROR\n");
+    }
+    strcpy(sbi,outstr);
     return 0;
 }
 
-int get_cpustr(sbar_info *sbi,struct cpu_info *cpu ) {
-    char result[60];
-    char b1[100];
-    int b3;
-    FILE *fd;
-    fd = fopen(cpu->conf,"r");
-    while ( fscanf(fd,"%s",b1) != EOF) {
-        if (strcmp(b1,"MHz") == 0) {
-            char b2[20];
-            fscanf(fd,"%s %d",b2,&b3);
-            sbi->cpustr = (int)b3;
-        } 
-    }
-    fclose(fd);
-    return 0;
-}
 
 int read_battery_state() {
     bat_state bs;
@@ -192,7 +163,7 @@ int read_battery_state() {
     char b3[30]; 
     unsigned int  ibuf = 0;
     FILE *fdbat;
-    fdbat = fopen(config[1],"r");
+    fdbat = fopen(config[0],"r");
     while (!feof(fdbat) ) {
         fgets(b1,sizeof(b1),fdbat);
         if ( sscanf(b1,"%s %s %u",b2,b3,&ibuf) == 2 ) {
@@ -218,9 +189,10 @@ int read_battery_state() {
     }
 }
 
-int get_battstr(sbar_info *sbi, struct bat_info *b) {
-    sbi->batmin = read_battery_state();
-    return 0;
+int get_battstr(struct bat_info *b) {
+    int bat = 0;
+    bat = read_battery_state();
+    return bat;
 }
 
 
@@ -275,13 +247,13 @@ static int alsa_get_vol() {
     return alsa_convert_prange(pvol,pmin,pmax);
 }
 
-int get_vol(sbar_info *sbi, vol_info *v) {
+int get_vol(char *volstr, vol_info *v) {
     v->mute = 0;
     v->percent  = alsa_get_vol();
     char buf_1[100];
     char vol[10]= " ";
     FILE *fd;
-    fd = fopen(config[2],"r");
+    fd = fopen(config[1],"r");
     while (fscanf(fd,"%s",buf_1) != EOF ) {
         if (strcmp(buf_1,"mute:") == 0 ) {
             char buf_2[10];
@@ -299,7 +271,7 @@ int get_vol(sbar_info *sbi, vol_info *v) {
         sprintf(vol,"%d%%",v->percent);
     }
 
-    strcpy(sbi->volstr,vol);
+    strcpy(volstr,vol);
     return 0; 
 }
 
@@ -340,33 +312,31 @@ int x_root_title ( char *new_title) {
     return 0;
 }
 int main( int argc, char **argv) {
-    struct cpu_info *c = cpu_info_init(config[0]);
-    struct bat_info *b = bat_info_init(config[1]);
+    struct bat_info *b = bat_info_init(config[0]);
     vol_info v;
 
-    char new_title[100];
-    
+    char volstr[10];
+    struct sysinfo sys_info;
+    char timestr[30];
     while(1) {
-        sbar_info sb;
-        sb.cpustr = 0;
-        sb.batmin= 0;
-        get_cpustr(&sb,c);
-        get_localtime(&sb);
-        get_battstr(&sb,b);
-/*        get_vol(&sb,&v);*/
-        if (1) {
-            printf("[vol:%s][bat:%dm][cpu:%dMHz] %s\n", sb.volstr , sb.batmin,sb.cpustr,sb.datestr);
+        char new_title[100];
+        get_vol(volstr,&v);
+        sysinfo(&sys_info);
+        
+        get_localtime(timestr);
+        sprintf(new_title,"[vol:%s][bat:%dm][load:%0.2f][free:%dM] %s", volstr ,get_battstr(b),((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr);
+
+        if (0) {
+            printf("%s\n",new_title);
         } else {
-            sprintf(new_title,"[vol:%s][bat:%dm][cpu:%dMHz] %s", sb.volstr , sb.batmin,sb.cpustr,sb.datestr);
             /*
             perror("Error");
             set me free */
             x_root_title(new_title);
         }
-        return 0;
         sleep(sleep_number);
     }
     
-    cleanup(c,b);
+    cleanup(b);
     return 0;
 }
