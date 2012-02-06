@@ -15,17 +15,22 @@
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
 #include <sys/sysinfo.h>
+#include <sensors/sensors.h>
 
 char *config[] = { 
 "/proc/acpi/battery/BAT0/state",
 "/proc/acpi/ibm/volume",
 };
 
+double get_chip_temp(const sensors_chip_name *name);
 static const unsigned int sleep_number = 1;
 
 static char card[64] = "default";
 static int smixer_level = 0;
 static struct snd_mixer_selem_regopt smixer_options;
+
+static int sensors_loaded = 0;
+const sensors_chip_name *temp_chip;
 
 
 struct bat_info {
@@ -278,8 +283,8 @@ int get_vol(char *volstr, vol_info *v) {
 int x_root_title ( char *new_title) {
    Display *d;
    Window w;
-   XEvent e;
    XTextProperty t;
+
    int s;
    char **list;
    int n;
@@ -292,18 +297,19 @@ int x_root_title ( char *new_title) {
    s = DefaultScreen(d);
 
    w = XDefaultRootWindow(d);
+
    XGetWMName(d,w,&t); 
    if(!t.nitems)
 		printf("missing XTextProperty");
    if(t.encoding == XA_STRING) {
-/*		printf("CURR %s",(char *)t.value); */
+        /*		printf("CURR %s",(char *)t.value); */
    } else {
 		if(XmbTextPropertyToTextList(d, &t, &list, &n) >= Success && n > 0 && *list) {
-			printf("SSSS %s", *list);
 			XFreeStringList(list);
 		}
 	}
     char *text = (char *)new_title;
+
     XStringListToTextProperty(&text,1,&t);
 
     XSetWMName(d,w,&t); 
@@ -311,22 +317,93 @@ int x_root_title ( char *new_title) {
     XCloseDisplay(d);
     return 0;
 }
-int main( int argc, char **argv) {
-    struct bat_info *b = bat_info_init(config[0]);
-    vol_info v;
 
-    char volstr[10];
-    struct sysinfo sys_info;
-    char timestr[30];
+int sbar_sensors_init() {
+    char input[] ="/etc/sensors3.conf";
+    FILE *config;
+    int err;
+
+    config = fopen(input,"r");
+
+    if (!config) { 
+        fprintf(stderr,"Could not open config file\n");
+        return 1;
+    }
+
+    err = sensors_init(config);
+
+    if ( err > 0 ) {
+        printf("Fail to init senosrs %d",err);
+        return 1;
+    } else {
+        int chip_nr;
+        double ret =0.0;
+
+        chip_nr = 0;
+        while ( ( temp_chip = sensors_get_detected_chips(NULL,&chip_nr)  )) {
+            ret = get_chip_temp(temp_chip);
+            if(ret) {
+                sensors_loaded = 1;
+                return 0;
+            }
+        }
+    }
+    sensors_cleanup();
+}
+
+double get_chip_temp(const sensors_chip_name *name ) {
+
+    const sensors_feature *feature;
+    
+    int i = 0;
+    char *label;
+    char str_t[6] = "temp1";
+    const sensors_subfeature *sf;
+    double val = 0.0;
+
+    while ( ( feature = sensors_get_features(name,&i) )) {
+        if (( label = sensors_get_label(name,feature)) ) {
+            if ( strcmp(label,str_t) == 0 && feature->type == SENSORS_FEATURE_TEMP ) {
+                int err;
+                sf = sensors_get_subfeature(name,feature,SENSORS_SUBFEATURE_TEMP_INPUT);
+                err = sensors_get_value(name,sf->number,&val);
+            }
+            free(label);
+            if (val > 0 )
+                return val ;
+         }
+    }
+}
+
+int main( int argc, char **argv) {
+    int str_out = 0;
+    
+    if (argc > 1 && strcmp(argv[1],"stdout") == 0) {
+        str_out = 1;
+    }
+
     while(1) {
+        struct bat_info *b = bat_info_init(config[0]);
+        vol_info v;
+
+        char volstr[10];
+        struct sysinfo sys_info;
+        char timestr[30];
         char new_title[100];
         get_vol(volstr,&v);
         sysinfo(&sys_info);
         
         get_localtime(timestr);
-        sprintf(new_title,"[vol:%s][bat:%dm][load:%0.2f][free:%dM] %s", volstr ,get_battstr(b),((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr);
+        if (sensors_loaded == 0 ) {
+            sbar_sensors_init(); 
+        }
+        double t1 =  get_chip_temp(temp_chip); 
 
-        if (0) {
+        sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,get_battstr(b),((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
+
+        if ( str_out == 1 ) {
+            /* printf("%s\n",new_title);
+            sprintf(new_title,"^i(/opt/bitmaps/volume.xbm)%s ^i(/opt/bitmaps/battery.xbm)%dm [load:%0.2f][free:%dM] %s", volstr ,get_battstr(b),((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr); */
             printf("%s\n",new_title);
         } else {
             /*
@@ -334,9 +411,11 @@ int main( int argc, char **argv) {
             set me free */
             x_root_title(new_title);
         }
+        fflush(stdout);
+        cleanup(b);
         sleep(sleep_number);
+        
     }
     
-    cleanup(b);
     return 0;
 }
