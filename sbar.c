@@ -18,8 +18,8 @@
 #include <sensors/sensors.h>
 
 char *config[] = { 
-"/proc/acpi/battery/BAT0/state",
-"/proc/acpi/ibm/volume",
+    "/proc/acpi/battery/BAT0/state",
+    "/proc/acpi/ibm/volume",
 };
 
 double get_chip_temp(const sensors_chip_name *name);
@@ -194,7 +194,7 @@ int read_battery_state() {
     }
 }
 
-int get_battstr(struct bat_info *b) {
+int get_bat_left(struct bat_info *b) {
     int bat = 0;
     bat = read_battery_state();
     return bat;
@@ -252,24 +252,28 @@ static int alsa_get_vol() {
     return alsa_convert_prange(pvol,pmin,pmax);
 }
 
-int get_vol(char *volstr, vol_info *v) {
+int get_vol(char *volstr, vol_info *v, int has_mute) {
     v->mute = 0;
     v->percent  = alsa_get_vol();
     char buf_1[100];
     char vol[10]= " ";
-    FILE *fd;
-    fd = fopen(config[1],"r");
-    while (fscanf(fd,"%s",buf_1) != EOF ) {
-        if (strcmp(buf_1,"mute:") == 0 ) {
-            char buf_2[10];
-            fscanf(fd,"%s",buf_2);
-            if (strcmp(buf_2,"off")  == 1 ) {
-                v->mute = 1;
+
+    if (has_mute) {
+
+        FILE *fd;
+        fd = fopen(config[1],"r");
+        while (fscanf(fd,"%s",buf_1) != EOF ) {
+            if (strcmp(buf_1,"mute:") == 0 ) {
+                char buf_2[10];
+                fscanf(fd,"%s",buf_2);
+                if (strcmp(buf_2,"off")  == 1 ) {
+                    v->mute = 1;
+                }
+                break;
             }
-            break;
         }
+        fclose(fd);
     }
-    fclose(fd);
     if (v->mute == 1 ) { 
         sprintf(vol,"%d%% muted",v->percent);
     } else {
@@ -375,31 +379,53 @@ double get_chip_temp(const sensors_chip_name *name ) {
     }
 }
 
+int file_exists ( char * file_name ) { 
+    struct stat buf;
+    int i = stat(file_name ,&buf);
+
+    return (i ? 0 : 1);
+
+}
+
 int main( int argc, char **argv) {
     int str_out = 0;
-    
+    int bat_exists  = file_exists(config[0]); 
+    int mute_exists = file_exists(config[1]);
+
     if (argc > 1 && strcmp(argv[1],"stdout") == 0) {
         str_out = 1;
     }
-
+    
     while(1) {
-        struct bat_info *b = bat_info_init(config[0]);
         vol_info v;
 
         char volstr[10];
         struct sysinfo sys_info;
         char timestr[30];
         char new_title[100];
-        get_vol(volstr,&v);
+        
+        get_vol(volstr,&v,mute_exists);
         sysinfo(&sys_info);
         
+
         get_localtime(timestr);
         if (sensors_loaded == 0 ) {
             sbar_sensors_init(); 
         }
-        double t1 =  get_chip_temp(temp_chip); 
 
-        sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,get_battstr(b),((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
+        double t1 =  get_chip_temp(temp_chip); 
+        int    bm = 0 ;
+        if (bat_exists) {            
+            struct bat_info *b = bat_info_init(config[0]);
+            bm = get_bat_left(b);
+            cleanup(b);
+        }
+         
+        if (bm == 0 ) {
+            sprintf(new_title,"[V:%s|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
+        } else {
+            sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,bm,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
+        }
 
         if ( str_out == 1 ) {
             /* printf("%s\n",new_title);
@@ -412,7 +438,6 @@ int main( int argc, char **argv) {
             x_root_title(new_title);
         }
         fflush(stdout);
-        cleanup(b);
         sleep(sleep_number);
         
     }
