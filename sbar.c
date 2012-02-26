@@ -290,7 +290,6 @@ int x_root_title ( char *new_title) {
    XTextProperty t;
 
    int s;
-   char **list;
    int n;
    d = XOpenDisplay(NULL);
    if (d == NULL) {
@@ -299,20 +298,9 @@ int x_root_title ( char *new_title) {
    }
  
    s = DefaultScreen(d);
-
    w = XDefaultRootWindow(d);
-
-   XGetWMName(d,w,&t); 
-   if(!t.nitems)
-		printf("missing XTextProperty");
-   if(t.encoding == XA_STRING) {
-        /*		printf("CURR %s",(char *)t.value); */
-   } else {
-		if(XmbTextPropertyToTextList(d, &t, &list, &n) >= Success && n > 0 && *list) {
-			XFreeStringList(list);
-		}
-	}
-    char *text = (char *)new_title;
+   
+   char *text = (char *)new_title;
 
     XStringListToTextProperty(&text,1,&t);
 
