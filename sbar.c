@@ -17,13 +17,9 @@
 #include <sys/sysinfo.h>
 #include <sensors/sensors.h>
 
-char *config[] = { 
-    "/proc/acpi/battery/BAT0/state",
-    "/proc/acpi/ibm/volume",
-};
+#include "config.h"
 
 double get_chip_temp(const sensors_chip_name *name);
-static const unsigned int sleep_number = 1;
 
 static char card[64] = "default";
 static int smixer_level = 0;
@@ -426,7 +422,7 @@ int main( int argc, char **argv) {
             x_root_title(new_title);
         }
         fflush(stdout);
-        sleep(sleep_number);
+        sleep(SLEEP_NUMBER);
         
     }
     
