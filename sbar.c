@@ -1,4 +1,6 @@
-/* sbar is simple status bar for dwm */
+/* sbar is simple status bar for dwm 
+ * well not so simple now  
+ * */
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -16,16 +18,18 @@
 #include <X11/Xutil.h>
 #include <sys/sysinfo.h>
 #include <sensors/sensors.h>
-
+#include <jansson.h>
 #include "config.h"
 
+double to_cels(double k) {  return k - 273.15; }
+double to_far(double k) { return (k * (9.0/5.0)) - 459.67;}
 double get_chip_temp(const sensors_chip_name *name);
 
 static char card[64] = "default";
 static int smixer_level = 0;
 static struct snd_mixer_selem_regopt smixer_options;
-
 static int sensors_loaded = 0;
+
 const sensors_chip_name *temp_chip;
 
 
@@ -371,10 +375,59 @@ int file_exists ( char * file_name ) {
 
 }
 
+double weather() {
+    char weather_url[] = OPENWEATHER_URL;
+    FILE *fp;
+    int status;
+    char buf[2048];
+    /* Open */
+    fp = popen(weather_url,"r");
+    if (fp == NULL ) {
+        printf("Fail to run command \n ");
+        return;
+    }
+    fgets(buf,sizeof(buf)-1,fp);
+    pclose(fp);
+
+    json_t *root;
+    json_error_t error;
+
+    root = json_loads(buf,0,&error);
+    if (!root) {
+        printf("Error on line %d : %s \n",error.line,error.text);
+    }
+    
+    json_t *branch,*temp;
+    const char *key;
+    void *iter = json_object_iter(root);
+    double k_temp;
+
+    while (iter) {
+        key = json_object_iter_key(iter);
+        branch = json_object_iter_value(iter);
+        if (strcmp(key,"main") == 0 ) {
+            temp = json_object_get(branch,"temp");
+            if ( json_is_real(temp) == 0 ) {
+                k_temp = 0.0;
+            } else {
+                k_temp = json_real_value(temp);
+                break;
+            }
+        }
+        iter = json_object_iter_next(root,iter);
+    }
+    /* printf (" Temperature in K[%f] ,C[%f],F[%f]\n",k_temp,to_cels(k_temp),to_far(k_temp) ); */
+    return k_temp;
+
+}
+
 int main( int argc, char **argv) {
     int str_out = 0;
     int bat_exists  = file_exists(config[0]); 
     int mute_exists = file_exists(config[1]);
+    int weather_ticks = 0;
+    
+    double kelvin   = weather();
 
     if (argc > 1 && strcmp(argv[1],"stdout") == 0) {
         str_out = 1;
@@ -382,12 +435,17 @@ int main( int argc, char **argv) {
     
     while(1) {
         vol_info v;
-
+        if (weather_ticks == WEATHER_FREQ) {
+            kelvin = weather();
+            weather_ticks = 0;
+        } else {
+            weather_ticks++;
+        }
         char volstr[10];
         struct sysinfo sys_info;
         char timestr[30];
         char new_title[100];
-        
+            
         get_vol(volstr,&v,mute_exists);
         sysinfo(&sys_info);
         
@@ -404,9 +462,9 @@ int main( int argc, char **argv) {
             bm = get_bat_left(b);
             cleanup(b);
         }
-         
+        
         if (bm == 0 ) {
-            sprintf(new_title,"[V:%s|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
+            sprintf(new_title,"[V:%s|L:%0.2f|Free:%dM|%0.1fC] %s [W:%0.0fF/%0.0fC]", volstr ,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
             sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,bm,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
         }

@@ -3,7 +3,7 @@ CFLAGS=-Wall
 PREFIX=/usr/local
 
 sbar: sbar.o
-	gcc -g sbar.o -lX11 -lasound -lsensors -lm -o sbar
+	gcc -g sbar.o -lX11 -lasound -lsensors -lm -o sbar -ljansson
 sbar.o: sbar.c
 	gcc -g -c sbar.c
 
