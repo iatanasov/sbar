@@ -1,12 +1,10 @@
-/* sbar is simple status bar for dwm 
- * well not so simple now  
- * */
+/* sbar is simple status bar for dwm  well not so simple now  */
 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <assert.h>
 #include <time.h>
+#include <ctype.h>
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <math.h>
@@ -18,16 +16,18 @@
 #include <X11/Xutil.h>
 #include <sys/sysinfo.h>
 #include <sensors/sensors.h>
-#include <jansson.h>
 #include "config.h"
+#include "external/dbg.h"
+#include "external/parson.h"
 
+int load_json_string(char *,char *,int);
 double to_cels(double k) {  return k - 273.15; }
 double to_far(double k) { return (k * (9.0/5.0)) - 459.67;}
 double get_chip_temp(const sensors_chip_name *name);
 
 static char card[64] = "default";
-static int smixer_level = 0;
 static struct snd_mixer_selem_regopt smixer_options;
+static int smixer_level = 0;
 static int sensors_loaded = 0;
 
 const sensors_chip_name *temp_chip;
@@ -40,7 +40,6 @@ struct bat_info {
 
 struct bat_info *bat_info_init(char *batconf) {
     struct bat_info *bat = malloc(sizeof(struct bat_info));
-    assert( bat != NULL);
     bat->conf = strdup(batconf);
     bat->interval = 30;
     return bat;
@@ -51,15 +50,6 @@ typedef struct vol_uinfo {
     int percent; /* current volume percent 0..100 */
 
 } vol_info;
-
-typedef struct bat_ustate {
-    int present; /* 1|0 */
-    char charge_state[10];
-    int prate;
-    int remaining;
-    int voltage;
-} bat_state;
-
 
 void cleanup(struct bat_info *bat)  {
     free(bat->conf);
@@ -72,7 +62,6 @@ static int alsa_parse_simple_id(const char *str, snd_mixer_selem_id_t *sid)
 	int c, size;
 	char buf[128];
 	char *ptr = buf;
-
 
 	while (*str == ' ' || *str == '\t')
 		str++;
@@ -116,18 +105,6 @@ static int alsa_parse_simple_id(const char *str, snd_mixer_selem_id_t *sid)
 	return 0;
 }
 
-
-static void alsa_error(const char *fmt,...)
-{
-	va_list va;
-
-	va_start(va, fmt);
-	fprintf(stderr, "amixer: ");
-	vfprintf(stderr, fmt, va);
-	fprintf(stderr, "\n");
-	va_end(va);
-}
-
 static int alsa_convert_prange(int val, int min, int max)
 {
 	int range = max - min;
@@ -140,68 +117,67 @@ static int alsa_convert_prange(int val, int min, int max)
 	return tmp;
 }
 
-int get_localtime(char *sbi) {
+int get_localtime(char *sbi) 
+{
     time_t t;
     struct tm *tmp;
 
     char outstr[100];
-    char result[100];
-    int ret;
+    
     t = time(NULL);
     tmp = localtime(&t);
     if (tmp == NULL ) {
-        perror("localtime");
+        return 0; 
+    } else {
+        if ( strftime(outstr,sizeof(outstr),"%c",tmp) == 0 ) {
+            printf("ERROR\n");
+        }
+        strcpy(sbi,outstr);
+        return 0;
     }
-    if ( strftime(outstr,sizeof(outstr),"%c",tmp) == 0 ) {
-        printf("ERROR\n");
-    }
-    strcpy(sbi,outstr);
-    return 0;
 }
 
-
-int read_battery_state() {
-    bat_state bs;
-    char result[100];
+int read_battery_state() 
+{
     char b1[100];
     char b2[30];
-    char b3[30]; 
+    char b3[30];
+    char b4[30]; 
     unsigned int  ibuf = 0;
+    int remaining = 0;
+    int prate = 0;
     FILE *fdbat;
+
     fdbat = fopen(config[0],"r");
     while (!feof(fdbat) ) {
         fgets(b1,sizeof(b1),fdbat);
         if ( sscanf(b1,"%s %s %u",b2,b3,&ibuf) == 2 ) {
-            sscanf(b1,"%s&%s %s",b2,b3);
+            sscanf(b1,"%s&%s %s",b2,b3,b4);
         } else {
             if (strcmp("capacity:",b3) == 0 ) {
-                bs.remaining = ibuf;
+                remaining = ibuf;
                 /* printf("> %s\n",b2); */
             }
             if (strcmp("rate:",b3) == 0 ) {
                 /* printf("> %s\n",b2); */
-                bs.prate = ibuf;
+                prate = ibuf;
             }
         }
     }
     fclose(fdbat);
-    if (bs.prate == 0 ) {
-        /* printf("currently charging\n"); */
-        return 0;
-    } else {
-        /* printf("Calculate %f * 60  %f \n",bs.remaining,bs.prate); */
-        return (bs.remaining*60)/bs.prate;
-    }
+    return  (prate == 0 ) ?  0 : (remaining*60)/prate;
 }
 
-int get_bat_left(struct bat_info *b) {
+int get_bat_left(struct bat_info *b) 
+{
     int bat = 0;
     bat = read_battery_state();
     return bat;
 }
 
 
-static int alsa_get_vol() {
+static int alsa_get_vol() 
+{
     int err = 0;
     static snd_mixer_t *handle = NULL;
     snd_mixer_elem_t *elem;
@@ -214,45 +190,44 @@ static int alsa_get_vol() {
     } else {
         if (handle == NULL ) {
             if((err = snd_mixer_open(&handle,0)) < 0 ) {
-    		    error("Control device %s open error: %s", card, snd_strerror(err));
-        		return err;
+                log_err("Control device %s open error: %s", card, snd_strerror(err));
             }
-    		if (smixer_level == 0 && (err = snd_mixer_attach(handle, card)) < 0) {
-    			error("Mixer attach %s error: %s", card, snd_strerror(err));
-    			snd_mixer_close(handle);
-    			handle = NULL;
-    			return err;
-    		}
-    		if ((err = snd_mixer_selem_register(handle, smixer_level > 0 ? &smixer_options : NULL, NULL)) < 0) {
-    			error("Mixer register error: %s", snd_strerror(err));
-    			snd_mixer_close(handle);
-    			handle = NULL;
-    			return err;
-	    	}
-    		err = snd_mixer_load(handle);
-    		if (err < 0) {
-    			error("Mixer %s load error: %s", card, snd_strerror(err));
-    			snd_mixer_close(handle);
-    			handle = NULL;
-    			return err;
+    	    if (smixer_level == 0 && (err = snd_mixer_attach(handle, card)) < 0) {
+    		log_err("Mixer attach %s error: %s", card, snd_strerror(err));
+    		snd_mixer_close(handle);
+    		handle = NULL;
+    		return err;
+            }
+            if ((err = snd_mixer_selem_register(handle, smixer_level > 0 ? &smixer_options : NULL, NULL)) < 0) {
+                log_err("Mixer register error: %s", snd_strerror(err));
+                snd_mixer_close(handle);
+                handle = NULL;
+                return err;
+	    }
+    	    err = snd_mixer_load(handle);
+    	    if (err < 0) {
+            	log_err("Mixer %s load error: %s", card, snd_strerror(err));
+                snd_mixer_close(handle);
+    		handle = NULL;
+    		return err;
     		}
         }
-		/* printf("Simple mixer control '%s',%i\n", snd_mixer_selem_id_get_name(sid), snd_mixer_selem_id_get_index(sid)); */
     }
-	elem = snd_mixer_find_selem(handle, sid);
-	if (!elem) {
-		error("Mixer %s simple element not found", card);
-		return -ENOENT;
-	}
+    elem = snd_mixer_find_selem(handle, sid);
+    if (!elem) {
+	log_err("Mixer %s simple element not found", card);
+	return -ENOENT;
+    }
     long pvol,pmin,pmax;
-	snd_mixer_selem_get_playback_volume_range(elem, &pmin, &pmax);
+    snd_mixer_selem_get_playback_volume_range(elem, &pmin, &pmax);
     snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_MONO, &pvol);
     snd_mixer_close(handle);
-	handle = NULL;
+    handle = NULL;
     return alsa_convert_prange(pvol,pmin,pmax);
 }
 
-int get_vol(char *volstr, vol_info *v, int has_mute) {
+int get_vol(char *volstr, vol_info *v, int has_mute) 
+{
     v->mute = 0;
     v->percent  = alsa_get_vol();
     char buf_1[100];
@@ -284,22 +259,18 @@ int get_vol(char *volstr, vol_info *v, int has_mute) {
     return 0; 
 }
 
-int x_root_title ( char *new_title) {
+int x_root_title ( char *new_title) 
+{
    Display *d;
    Window w;
    XTextProperty t;
 
-   int s;
-   int n;
    d = XOpenDisplay(NULL);
    if (d == NULL) {
       fprintf(stderr, "Cannot open display\n");
       exit(1);
    }
- 
-   s = DefaultScreen(d);
    w = XDefaultRootWindow(d);
-   
    char *text = (char *)new_title;
 
     XStringListToTextProperty(&text,1,&t);
@@ -310,7 +281,8 @@ int x_root_title ( char *new_title) {
     return 0;
 }
 
-int sbar_sensors_init() {
+int sbar_sensors_init() 
+{
     char input[] ="/etc/sensors3.conf";
     FILE *config;
     int err;
@@ -341,12 +313,12 @@ int sbar_sensors_init() {
         }
     }
     sensors_cleanup();
+    return 0;
 }
 
-double get_chip_temp(const sensors_chip_name *name ) {
-
+double get_chip_temp(const sensors_chip_name *name ) 
+{
     const sensors_feature *feature;
-    
     int i = 0;
     char *label;
     char str_t[6] = "temp1";
@@ -356,15 +328,17 @@ double get_chip_temp(const sensors_chip_name *name ) {
     while ( ( feature = sensors_get_features(name,&i) )) {
         if (( label = sensors_get_label(name,feature)) ) {
             if ( strcmp(label,str_t) == 0 && feature->type == SENSORS_FEATURE_TEMP ) {
-                int err;
                 sf = sensors_get_subfeature(name,feature,SENSORS_SUBFEATURE_TEMP_INPUT);
-                err = sensors_get_value(name,sf->number,&val);
+                if ( sensors_get_value(name,sf->number,&val) != 0 ) {
+                    printf("ERROR\n");
+                }
             }
             free(label);
             if (val > 0 )
                 return val ;
          }
     }
+    return val;
 }
 
 int file_exists ( char * file_name ) { 
@@ -376,47 +350,27 @@ int file_exists ( char * file_name ) {
 }
 
 double weather() {
-    char weather_url[] = OPENWEATHER_URL;
-    FILE *fp;
-    int status;
-    char buf[2048];
-    /* Open */
-    fp = popen(weather_url,"r");
-    if (fp == NULL ) {
-        printf("Fail to run command \n ");
-        return;
-    }
-    fgets(buf,sizeof(buf)-1,fp);
-    pclose(fp);
-
-    json_t *root;
-    json_error_t error;
-
-    root = json_loads(buf,0,&error);
-    if (!root) {
-        printf("Error on line %d : %s \n",error.line,error.text);
-    }
-    
-    json_t *branch,*temp;
-    const char *key;
-    void *iter = json_object_iter(root);
+    int ret;
+    int blen = 2048;
+    char buf[blen];
     double k_temp;
+    ret = load_json_string(OPENWEATHER_URL,buf,sizeof(char)*blen);
 
-    while (iter) {
-        key = json_object_iter_key(iter);
-        branch = json_object_iter_value(iter);
-        if (strcmp(key,"main") == 0 ) {
-            temp = json_object_get(branch,"temp");
-            if ( json_is_real(temp) == 0 ) {
-                k_temp = 0.0;
-            } else {
-                k_temp = json_real_value(temp);
-                break;
-            }
-        }
-        iter = json_object_iter_next(root,iter);
+    if (ret) {
+        printf("ERROR\n");
     }
-    /* printf (" Temperature in K[%f] ,C[%f],F[%f]\n",k_temp,to_cels(k_temp),to_far(k_temp) ); */
+    JSON_Value *root_value;
+    JSON_Object *item;
+    
+    root_value = json_parse_string(buf);
+    if (root_value == NULL ) {
+        printf ("ERROR \n");
+        return 0.0; 
+    } 
+    
+    item = json_value_get_object(root_value);
+    k_temp = json_object_get_number(json_object_get_object(item,"main"),"temp");
+
     return k_temp;
 
 }
@@ -464,25 +418,26 @@ int main( int argc, char **argv) {
         }
         
         if (bm == 0 ) {
-            sprintf(new_title,"[V:%s|L:%0.2f|Free:%dM|%0.1fC] %s [W:%0.0fF/%0.0fC]", volstr ,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
+            sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
-            sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%dM|%0.1fC] %s", volstr ,bm,((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr);
+            sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
         }
 
-        if ( str_out == 1 ) {
-            /* printf("%s\n",new_title);
-            sprintf(new_title,"^i(/opt/bitmaps/volume.xbm)%s ^i(/opt/bitmaps/battery.xbm)%dm [load:%0.2f][free:%dM] %s", volstr ,get_battstr(b),((float)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr); */
-            printf("%s\n",new_title);
-        } else {
-            /*
-            perror("Error");
-            set me free */
-            x_root_title(new_title);
-        }
+        ( str_out == 1 ) ? printf("%s\n",new_title) :  x_root_title(new_title);
         fflush(stdout);
         sleep(SLEEP_NUMBER);
-        
     }
-    
+    return 0;
+}
+
+int load_json_string(char *cmd,char *buf,int bsize) {
+    FILE *fp;
+    fp = popen(cmd,"r");
+    if (fp == NULL ) {
+        printf("Fail to run command \n ");
+        return 1;
+    }
+    fgets(buf,bsize-1,fp);
+    pclose(fp);
     return 0;
 }
