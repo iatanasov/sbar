@@ -5,16 +5,20 @@
 #include <string.h>
 #include <time.h>
 #include <ctype.h>
-#include <sys/stat.h>
 #include <fcntl.h>
 #include <math.h>
+#include <sys/stat.h>
+#include <sys/sysinfo.h>
+#include <sys/ioctl.h>
+#include <netinet/in.h>
+#include <net/if.h>
+#include <arpa/inet.h>
 #include <alsa/asoundlib.h>
 #include <unistd.h>
 #include <X11/Xatom.h>
 #include <X11/Xlib.h>
 #include <X11/Xproto.h>
 #include <X11/Xutil.h>
-#include <sys/sysinfo.h>
 #include <sensors/sensors.h>
 #include "config.h"
 #include "external/dbg.h"
@@ -24,7 +28,7 @@ int load_json_string(char *,char *,int);
 double to_cels(double k) {  return k - 273.15; }
 double to_far(double k) { return (k * (9.0/5.0)) - 459.67;}
 double get_chip_temp(const sensors_chip_name *name);
-
+int get_ip(char *);
 static char card[64] = "default";
 static struct snd_mixer_selem_regopt smixer_options;
 static int smixer_level = 0;
@@ -396,6 +400,7 @@ int main( int argc, char **argv) {
             weather_ticks++;
         }
         char volstr[10];
+        char ip[16];
         struct sysinfo sys_info;
         char timestr[30];
         char new_title[100];
@@ -416,11 +421,11 @@ int main( int argc, char **argv) {
             bm = get_bat_left(b);
             cleanup(b);
         }
-        
+        get_ip(ip);
         if (bm == 0 ) {
-            sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
+            sprintf(new_title,"[%s] [V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]",ip, volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
-            sprintf(new_title,"[V:%s|B:%dm|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
+            sprintf(new_title,"[%s] [V:%s|B:%dm|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",ip,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
         }
 
         ( str_out == 1 ) ? printf("%s\n",new_title) :  x_root_title(new_title);
@@ -439,5 +444,24 @@ int load_json_string(char *cmd,char *buf,int bsize) {
     }
     fgets(buf,bsize-1,fp);
     pclose(fp);
+    return 0;
+}
+
+int get_ip(char* buf) {
+    int fd;
+    struct ifreq ifr;
+    fd = socket(AF_INET, SOCK_DGRAM, 0);
+
+    /* I want to get an IPv4 IP address */
+    ifr.ifr_addr.sa_family = AF_INET;
+
+    /* I want IP address attached to "eth0" */
+    strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);
+
+    ioctl(fd, SIOCGIFADDR, &ifr);
+    close(fd);
+
+    /* display result */
+    sprintf(buf,"%s", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
     return 0;
 }
