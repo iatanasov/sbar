@@ -25,7 +25,7 @@
 #include "external/parson.h"
 
 int load_json_string(char *,char *,int);
-double to_cels(double k) {  return k - 273.15; }
+double to_cels(double k) {  return (k - 273.15); }
 double to_far(double k) { return (k * (9.0/5.0)) - 459.67;}
 double get_chip_temp(const sensors_chip_name *name);
 int get_ip(char *);
@@ -144,9 +144,8 @@ int get_localtime(char *sbi)
 int read_battery_state() 
 {
     char b1[100];
-    char b2[30];
+    char b2[40];
     char b3[30];
-    char b4[30]; 
     unsigned int  ibuf = 0;
     int remaining = 0;
     int prate = 0;
@@ -154,22 +153,29 @@ int read_battery_state()
 
     fdbat = fopen(config[0],"r");
     while (!feof(fdbat) ) {
-        fgets(b1,sizeof(b1),fdbat);
-        if ( sscanf(b1,"%s %s %u",b2,b3,&ibuf) == 2 ) {
-            sscanf(b1,"%s&%s %s",b2,b3,b4);
+        if ( NULL != fgets(b1,sizeof(b1),fdbat) ) {
+            char *nlptr = strchr(b1, '\n');
+            if (nlptr) *nlptr = '\0';
+        }
+        if ( sscanf(b1,"%s%[^=]%s",b2,b3,b3) == 2 ) {
+/*            sscanf(b1,"%s=%s %s",b2,b3,b4) */
         } else {
-            if (strcmp("capacity:",b3) == 0 ) {
+/* printf("> [ %s ]\n",b2); */
+            char *cap = strstr(b2,"POWER_SUPPLY_CAPACITY=");
+            if (cap != NULL ) {
+                char *t; 
+                t = strtok(b2,"=");
+                t = strtok(NULL,"="); 
+                ibuf = atoi(t);
                 remaining = ibuf;
-                /* printf("> %s\n",b2); */
             }
             if (strcmp("rate:",b3) == 0 ) {
-                /* printf("> %s\n",b2); */
                 prate = ibuf;
             }
         }
     }
     fclose(fdbat);
-    return  (prate == 0 ) ?  0 : (remaining*60)/prate;
+    return  (prate == 0 ) ?  ibuf : (remaining*60)/prate;
 }
 
 int get_bat_left(struct bat_info *b) 
@@ -312,11 +318,14 @@ int sbar_sensors_init()
             ret = get_chip_temp(temp_chip);
             if(ret) {
                 sensors_loaded = 1;
+                sensors_cleanup();
+                fclose(config);
                 return 0;
             }
         }
     }
     sensors_cleanup();
+    fclose(config);
     return 0;
 }
 
@@ -362,6 +371,7 @@ double weather() {
 
     if (ret) {
         printf("ERROR\n");
+        return 100.0;
     }
     JSON_Value *root_value;
     JSON_Object *item;
@@ -369,12 +379,11 @@ double weather() {
     root_value = json_parse_string(buf);
     if (root_value == NULL ) {
         printf ("ERROR \n");
-        return 0.0; 
+        return 100.0; 
     } 
     
     item = json_value_get_object(root_value);
     k_temp = json_object_get_number(json_object_get_object(item,"main"),"temp");
-
     return k_temp;
 
 }
@@ -421,11 +430,19 @@ int main( int argc, char **argv) {
             bm = get_bat_left(b);
             cleanup(b);
         }
-        get_ip(ip);
+        /* get ip */
+        if (0) {
+            get_ip(ip);
+            if (bm == 0 ) {
+                sprintf(new_title,"[%s] [V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]",ip, volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
+            } else {
+             sprintf(new_title,"[%s] [V:%s|B:%d|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",ip,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
+            }
+        }
         if (bm == 0 ) {
-            sprintf(new_title,"[%s] [V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]",ip, volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
+            sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
-            sprintf(new_title,"[%s] [V:%s|B:%dm|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",ip,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
+            sprintf(new_title,"[V:%s|B:%d%%|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
         }
 
         ( str_out == 1 ) ? printf("%s\n",new_title) :  x_root_title(new_title);
@@ -450,13 +467,14 @@ int load_json_string(char *cmd,char *buf,int bsize) {
 int get_ip(char* buf) {
     int fd;
     struct ifreq ifr;
+    
     fd = socket(AF_INET, SOCK_DGRAM, 0);
 
     /* I want to get an IPv4 IP address */
     ifr.ifr_addr.sa_family = AF_INET;
 
     /* I want IP address attached to "eth0" */
-    strncpy(ifr.ifr_name, "eth0", IFNAMSIZ-1);
+    strncpy(ifr.ifr_name, "wlp3s0", IFNAMSIZ-1);
 
     ioctl(fd, SIOCGIFADDR, &ifr);
     close(fd);
