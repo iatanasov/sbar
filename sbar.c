@@ -134,7 +134,7 @@ int get_localtime(char *sbi)
         return 0; 
     } else {
         if ( strftime(outstr,sizeof(outstr),"%c",tmp) == 0 ) {
-            printf("ERROR\n");
+            printf("get_localtime ERROR\n");
         }
         strcpy(sbi,outstr);
         return 0;
@@ -146,7 +146,7 @@ int read_battery_state()
     char b1[100];
     char b2[40];
     char b3[30];
-    unsigned int  ibuf = 0;
+    int  ibuf = 0;
     int remaining = 0;
     int prate = 0;
     FILE *fdbat;
@@ -169,13 +169,20 @@ int read_battery_state()
                 ibuf = atoi(t);
                 remaining = ibuf;
             }
-            if (strcmp("rate:",b3) == 0 ) {
+            if (b3 != NULL && strcmp("rate:",b3) == 0) {
                 prate = ibuf;
             }
         }
     }
     fclose(fdbat);
-    return  (prate == 0 ) ?  ibuf : (remaining*60)/prate;
+    
+    int res = ibuf;
+    
+    if (prate > 0 && remaining > 0) {
+        res = (remaining*60)/prate;
+    }
+    
+    return  res;
 }
 
 int get_bat_left(struct bat_info *b) 
@@ -233,6 +240,7 @@ static int alsa_get_vol()
     snd_mixer_selem_get_playback_volume(elem, SND_MIXER_SCHN_MONO, &pvol);
     snd_mixer_close(handle);
     handle = NULL;
+    snd_config_update_free_global();
     return alsa_convert_prange(pvol,pmin,pmax);
 }
 
@@ -316,7 +324,7 @@ int sbar_sensors_init()
         chip_nr = 0;
         while ( ( temp_chip = sensors_get_detected_chips(NULL,&chip_nr)  )) {
             ret = get_chip_temp(temp_chip);
-            if(ret) {
+            if(ret > 0.0) {
                 sensors_loaded = 1;
                 sensors_cleanup();
                 fclose(config);
@@ -334,22 +342,28 @@ double get_chip_temp(const sensors_chip_name *name )
     const sensors_feature *feature;
     int i = 0;
     char *label;
-    char str_t[6] = "temp1";
+    char str_t[14] = "Physical id 0";
     const sensors_subfeature *sf;
     double val = 0.0;
 
     while ( ( feature = sensors_get_features(name,&i) )) {
         if (( label = sensors_get_label(name,feature)) ) {
-            if ( strcmp(label,str_t) == 0 && feature->type == SENSORS_FEATURE_TEMP ) {
+            printf("LABEL : %s ",label);
+
+            if ( strncmp(label,str_t,8) == 0 && feature->type == SENSORS_FEATURE_TEMP ) {
                 sf = sensors_get_subfeature(name,feature,SENSORS_SUBFEATURE_TEMP_INPUT);
                 if ( sensors_get_value(name,sf->number,&val) != 0 ) {
-                    printf("ERROR\n");
+                    printf("get_chip_temp ERROR\n");
                 }
             }
-            free(label);
-            if (val > 0 )
+            printf("VAL : %f \n", val);
+            if (val > 0 ) {
+                free(label);
+            printf("\n RETURNING : %f \n", val);
                 return val ;
+            }
          }
+        free(label);
     }
     return val;
 }
@@ -370,15 +384,16 @@ double weather() {
     ret = load_json_string(OPENWEATHER_URL,buf,sizeof(char)*blen);
 
     if (ret) {
-        printf("ERROR\n");
+        printf("weather Fail to load json ERROR\n");
         return 100.0;
     }
     JSON_Value *root_value;
     JSON_Object *item;
-    
+  
+    printf("WEATHER : %s",buf); 
     root_value = json_parse_string(buf);
     if (root_value == NULL ) {
-        printf ("ERROR \n");
+        printf ("weater Fail to parse json ERROR \n");
         return 100.0; 
     } 
     
@@ -430,19 +445,20 @@ int main( int argc, char **argv) {
             bm = get_bat_left(b);
             cleanup(b);
         }
+        /*printf("VVVVVVV %f ",t1); */
         /* get ip */
         if (0) {
             get_ip(ip);
             if (bm == 0 ) {
-                sprintf(new_title,"[%s] [V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]",ip, volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
+                sprintf(new_title,"[%s] [V:%s|L:%0.2f|Free:%luM|%fC] %s [W:%0.0fF/%0.0fC]",ip, volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
             } else {
-             sprintf(new_title,"[%s] [V:%s|B:%d|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",ip,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
+             sprintf(new_title,"[%s] [V:%s|B:%d|L:%0.2f|Free:%luM|%fC] %s  [W:%0.0fF/%0.0fC]",ip,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
             }
         }
         if (bm == 0 ) {
-            sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.1fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
+            sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.0fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
-            sprintf(new_title,"[V:%s|B:%d%%|L:%0.2f|Free:%luM|%0.1fC] %s  [W:%0.0fF/%0.0fC]",volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
+            sprintf(new_title,"[V:%s|B:%d%%|L:%0.2f|Free:%luM|%0.0fC] %s  [W:%0.0fF/%0.0fC]",volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
         }
 
         ( str_out == 1 ) ? printf("%s\n",new_title) :  x_root_title(new_title);
