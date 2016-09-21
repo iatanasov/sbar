@@ -3,13 +3,29 @@ CFLAGS=-O2 -g -Wall -g
 PREFIX=/usr/local
 NAME=sbar
 
-sbar: sbar.o
-	gcc ${CFLAGS} external/parson.c sbar.o -lX11 -lasound -lsensors -lm -o sbar
-sbar.o: sbar.c
-	gcc ${CFLAGS} -c sbar.c
+SRC=external/parson.c sbar.c
+OBJ=parson.o sbar.o
+
+all: options sbar
+
+options:
+	@echo sbar build options:
+	@echo "CFLAGS = ${CFLAGS}"
+	@echo "CC	  = ${CC}"
+
+.c.o:
+	@echo ${CC} -c ${CFLAGS} ${SRC}
+	@${CC} -c ${CFLAGS} ${SRC}
+
+${OBJ}: config.h
+
+sbar: ${OBJ}
+	@echo ${CC} -o $@ ${OBJ} -lX11 -lasound -lsensors -lm
+	@${CC} -o $@ ${OBJ} -lX11 -lasound -lsensors -lm
 
 clean:
-	rm -f sbar.o ${NAME} parson.o
+	@echo 
+	@rm -f sbar.o ${NAME} parson.o
 
 install:
 	@cp sbar ${PREFIX}/bin/sbar
