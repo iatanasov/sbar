@@ -28,7 +28,7 @@ int load_json_string(char *,char *,int);
 double to_cels(double k) {  return (k - 273.15); }
 double to_far(double k) { return (k * (9.0/5.0)) - 459.67;}
 double get_chip_temp(const sensors_chip_name *name);
-int get_ip(char *);
+int get_message(char *);
 static char card[64] = "default";
 static struct snd_mixer_selem_regopt smixer_options;
 static int smixer_level = 0;
@@ -61,8 +61,7 @@ void cleanup(struct bat_info *bat)  {
 }
 
 
-static int alsa_parse_simple_id(const char *str, snd_mixer_selem_id_t *sid)
-{
+static int alsa_parse_simple_id(const char *str, snd_mixer_selem_id_t *sid){
 	int c, size;
 	char buf[128];
 	char *ptr = buf;
@@ -389,8 +388,6 @@ double weather() {
     }
     JSON_Value *root_value;
     JSON_Object *item;
-  
-    printf("WEATHER : %s",buf); 
     root_value = json_parse_string(buf);
     if (root_value == NULL ) {
         printf ("weater Fail to parse json ERROR \n");
@@ -424,7 +421,6 @@ int main( int argc, char **argv) {
             weather_ticks++;
         }
         char volstr[10];
-        char ip[16];
         struct sysinfo sys_info;
         char timestr[30];
         char new_title[100];
@@ -438,13 +434,13 @@ int main( int argc, char **argv) {
             sbar_sensors_init(); 
         }
 
-        double t1 =  get_chip_temp(temp_chip); 
         int    bm = 0 ;
         if (bat_exists) {            
             struct bat_info *b = bat_info_init(config[0]);
             bm = get_bat_left(b);
             cleanup(b);
         }
+<<<<<<< HEAD
         /*printf("VVVVVVV %f ",t1); */
         /* get ip */
         if (0) {
@@ -458,11 +454,21 @@ int main( int argc, char **argv) {
         if (bm == 0 ) {
             sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.0fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
-            sprintf(new_title,"[V:%s|B:%d%%|L:%0.2f|Free:%luM|%0.0fC] %s  [W:%0.0fF/%0.0fC]",volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
+	
+				char notification[512];
+                get_message(notification);
+				if (bm == 0 ) {
+            sprintf(new_title,"<%s>[V:%s|L:%0.1f|M:%luM] %s %0.0f\u2109/%0.0f\u2103", notification,volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr,to_far(kelvin),to_cels(kelvin) );
+        } else {
+            sprintf(new_title,"<%s>[V:%s|B:%d%%|L:%0.2f|M:%luM] %s %0.0f\u2109/%0.0f\u2103",notification,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr,to_far(kelvin),to_cels(kelvin));
         }
-
-        ( str_out == 1 ) ? printf("%s\n",new_title) :  x_root_title(new_title);
-        fflush(stdout);
+				if ( str_out == 1 ) {
+					printf("%s\n",new_title);
+        	fflush(stdout);
+				} else {	
+					x_root_title(new_title);
+				} 
+	
         sleep(SLEEP_NUMBER);
     }
     return 0;
@@ -480,22 +486,25 @@ int load_json_string(char *cmd,char *buf,int bsize) {
     return 0;
 }
 
-int get_ip(char* buf) {
-    int fd;
-    struct ifreq ifr;
-    
-    fd = socket(AF_INET, SOCK_DGRAM, 0);
+int get_message(char *notif) {
+    FILE *config = fopen("/home/iatanaso/dwm_status","r");
+    size_t len = 0; 
+    char* line;
+    ssize_t read;
+    if (config) {
+        while (( read = getline(&line,&len,config)) != -1 ) {
+            line[read-1]='\0';
+            sprintf(notif,"%s",line);
+        }
+        if (ferror(config)) {
 
-    /* I want to get an IPv4 IP address */
-    ifr.ifr_addr.sa_family = AF_INET;
-
-    /* I want IP address attached to "eth0" */
-    strncpy(ifr.ifr_name, "wlp3s0", IFNAMSIZ-1);
-
-    ioctl(fd, SIOCGIFADDR, &ifr);
-    close(fd);
-
-    /* display result */
-    sprintf(buf,"%s", inet_ntoa(((struct sockaddr_in *)&ifr.ifr_addr)->sin_addr));
+        }
+        fclose(config);
+        free(line);
+    } else {
+        printf(stderr,"Could not open config file\n");
+        return 1;
+    }
+    // TODO 
     return 0;
 }
