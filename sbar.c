@@ -440,17 +440,6 @@ int main( int argc, char **argv) {
             bm = get_bat_left(b);
             cleanup(b);
         }
-<<<<<<< HEAD
-        /*printf("VVVVVVV %f ",t1); */
-        /* get ip */
-        if (0) {
-            get_ip(ip);
-            if (bm == 0 ) {
-                sprintf(new_title,"[%s] [V:%s|L:%0.2f|Free:%luM|%fC] %s [W:%0.0fF/%0.0fC]",ip, volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
-            } else {
-             sprintf(new_title,"[%s] [V:%s|B:%d|L:%0.2f|Free:%luM|%fC] %s  [W:%0.0fF/%0.0fC]",ip,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin));
-            }
-        }
         if (bm == 0 ) {
             sprintf(new_title,"[V:%s|L:%0.2f|Free:%luM|%0.0fC] %s [W:%0.0fF/%0.0fC]", volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),t1,timestr,to_far(kelvin),to_cels(kelvin) );
         } else {
@@ -459,15 +448,13 @@ int main( int argc, char **argv) {
                 get_message(notification);
 				if (bm == 0 ) {
             sprintf(new_title,"<%s>[V:%s|L:%0.1f|M:%luM] %s %0.0f\u2109/%0.0f\u2103", notification,volstr,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr,to_far(kelvin),to_cels(kelvin) );
-        } else {
-            sprintf(new_title,"<%s>[V:%s|B:%d%%|L:%0.2f|M:%luM] %s %0.0f\u2109/%0.0f\u2103",notification,volstr,bm,((double)sys_info.loads[0]/65536.0),sys_info.freeram*sys_info.mem_unit/(1024*1024),timestr,to_far(kelvin),to_cels(kelvin));
         }
-				if ( str_out == 1 ) {
-					printf("%s\n",new_title);
-        	fflush(stdout);
-				} else {	
-					x_root_title(new_title);
-				} 
+        if ( str_out == 1 ) {
+            printf("%s\n",new_title);
+            fflush(stdout);
+		} else {	
+            x_root_title(new_title);
+		} 
 	
         sleep(SLEEP_NUMBER);
     }
